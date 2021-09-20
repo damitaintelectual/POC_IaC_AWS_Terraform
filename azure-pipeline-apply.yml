@@ -1,0 +1,70 @@
+name: $(Rev:r)
+
+resources:
+  - repo: self
+
+trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-18.04
+
+steps:
+# Install Terraform especific version 
+  - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
+    displayName: Install Terraform 1.0.7
+    inputs:
+      terraformVersion: 1.0.7
+
+# Initialize and connect terraform with AWS / S3 bucket
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : AWS connection & init'
+    inputs:
+      provider: aws
+      workingDirectory: src
+      backendServiceAWS: 59a2c16f-ed24-4b0e-b097-81f5586fbbcc
+      backendAWSBucketName: terraform-s3-backup
+      backendAWSKey: tfstate/terraform.tfstate
+
+# Validate main.tf file 
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : validate'
+    inputs:
+      provider: aws
+      command: validate
+      workingDirectory: src
+      backendServiceAWS: 59a2c16f-ed24-4b0e-b097-81f5586fbbcc
+
+# Planning the IaC
+  - task: TerraformTaskV2@2
+    name: ''
+    displayName: 'Terraform : plan'
+    inputs:
+      provider: aws
+      command: plan
+      workingDirectory: src
+      commandOptions: -out=tfplan -input=false
+      environmentServiceNameAWS: 59a2c16f-ed24-4b0e-b097-81f5586fbbcc
+
+# Create IaC planned 
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : apply'
+    inputs:
+      provider: aws
+      command: apply
+      workingDirectory: src
+      commandOptions: -input=false tfplan
+      environmentServiceNameAWS: 59a2c16f-ed24-4b0e-b097-81f5586fbbcc
+
+# Wait wait 4 minutes for resources stabilization
+  - bash: 'sleep 1m'
+    displayName: 'Time - Wait 1 minute for resources stabilization'
+
+# Get Public Ip to access to the website from the browser
+  - task: AmazonWebServices.aws-vsts-tools.AWSShellScript.AWSShellScript@1
+    displayName: 'AWS - Public IP from Web Host'
+    inputs:
+      awsCredentials: 'AWS_USER'
+      regionName: 'us-east-1'
+      scriptType: inline
+      inlineScript: 'aws ec2 describe-instances --query "Reservations[*].Instances[*].{PublicIP:PublicIpAddress,Name:Tags[?Key==''Name'']|[0]."Web_Host_1",Status:State.Name}" --filters "Name=instance-state-name,Values=running" --output text'
